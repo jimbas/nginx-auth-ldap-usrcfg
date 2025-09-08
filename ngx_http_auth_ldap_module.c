@@ -314,6 +314,9 @@ ngx_module_t ngx_http_auth_ldap_module = {
     NGX_MODULE_V1_PADDING
 };
 
+u_char  *allowed_users_base;
+size_t  allowed_users_size;
+
 
 /*** Configuration and initialization ***/
 
@@ -395,6 +398,10 @@ ngx_http_auth_ldap_ldap_server(ngx_conf_t *cf, ngx_command_t *dummy, void *conf)
     ngx_http_auth_ldap_main_conf_t *cnf = conf;
     ngx_int_t                      i;
 
+    ngx_file_t                    file;
+    ngx_file_info_t               fi;
+    ssize_t                       n;
+
     /* It should be safe to just use latest server from array */
     server = ((ngx_http_auth_ldap_server_t *) cnf->servers->elts + (cnf->servers->nelts - 1));
 
@@ -447,6 +454,36 @@ ngx_http_auth_ldap_ldap_server(ngx_conf_t *cf, ngx_command_t *dummy, void *conf)
       server->ssl_ca_dir = value[1];
     } else if (ngx_strcmp(value[0].data, "ssl_ca_file") == 0) {
       server->ssl_ca_file = value[1];
+    } else if (ngx_strcmp(value[0].data, "allowed_users") == 0) {
+        ngx_memzero(&file, sizeof(ngx_file_t));
+        file.name = value[1];
+        file.log = cf->log;
+        file.fd = ngx_open_file(value[1].data, NGX_FILE_RDONLY, NGX_FILE_OPEN, 0);
+        if (file.fd == NGX_INVALID_FILE) {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "error tries to open allowed_users file");
+            return NGX_CONF_ERROR;
+        }
+        if (ngx_fd_info(file.fd, &fi) == NGX_FILE_ERROR) {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "error fd info for allowed_users file");
+            return NGX_CONF_ERROR;
+        }
+        allowed_users_size = (size_t) ngx_file_size(&fi);
+        allowed_users_base = ngx_palloc(cf->pool, allowed_users_size);
+        if (allowed_users_base == NULL) {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "error tries to alloc for allowed_users file");
+            return NGX_CONF_ERROR;
+        }
+        n = ngx_read_file(&file, allowed_users_base, allowed_users_size, 0);
+        if (n == NGX_ERROR) {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "error tries to read allowed_users file");
+            return NGX_CONF_ERROR;
+        }
+        for(i=0; i<(ngx_int_t)(allowed_users_size-1); i++) {
+            if(allowed_users_base[i] == '\n')
+                allowed_users_base[i] = ',';
+        }
+        allowed_users_base[allowed_users_size-1] = '\0';
+        // ngx_conf_log_error(NGX_LOG_NOTICE, cf, 0, "allowed_users are : %s %d", allowed_users_base, allowed_users_size);
     }
     else CONF_MSEC_VALUE(cf,value,server,connect_timeout)
     else CONF_MSEC_VALUE(cf,value,server,reconnect_timeout)
@@ -2059,9 +2096,9 @@ static ngx_int_t
 ngx_http_auth_ldap_search(ngx_http_request_t *r, ngx_http_auth_ldap_ctx_t *ctx)
 {
     LDAPURLDesc *ludpp;
-    u_char *filter;
+    u_char *filter,*lcurusr,*lregusr,lch;
     char *attrs[2];
-    ngx_int_t rc;
+    ngx_int_t rc,i,j,k;
 
     /* On the first call, initiate the LDAP search operation */
     if (ctx->iteration == 0) {
@@ -2109,6 +2146,73 @@ ngx_http_auth_ldap_search(ngx_http_request_t *r, ngx_http_auth_ldap_ctx_t *ctx)
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "http_auth_ldap: Could not find user DN");
         return NGX_ERROR;
     } else {
+        //ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "allowed users: %s [%d]", allowed_users_base, allowed_users_size);
+        lcurusr = ngx_palloc(ctx->r->pool, 32);
+        if (lcurusr == NULL) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "error lcurusr alloc");
+            return NGX_ERROR;
+        }
+        for(i=0,j=-1;i<(ngx_int_t)ctx->dn.len;i++) {
+            if(j<0) {
+                if(ctx->dn.data[i] == '=') {
+                    j=0;
+                }
+            } else {
+                if(ctx->dn.data[i] == ',') {
+                    lcurusr[j] = '\0';
+                } else {
+                    lch = ctx->dn.data[i];
+                    if(lch == ' ') {
+                        lch = '.';
+                    }
+                    lcurusr[j] = ngx_tolower(lch);
+                }
+                j++;
+            }
+        }
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "current-user: %s", lcurusr);
+        lregusr = ngx_palloc(ctx->r->pool, 32);
+        if (lregusr == NULL) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "error lregusr alloc");
+            return NGX_ERROR;
+        }
+        i=0; k=0;
+        while(1) {
+            if(k < 0) {
+                break;
+            }
+            j=0;
+            while(1) {
+                if(allowed_users_base[i] == ',' || allowed_users_base[i] == '\0') {
+                    lregusr[j] = '\0';
+                    if(allowed_users_base[i] == '\0') {
+                        k = -1;
+                    }
+                    break;
+                }
+                lregusr[j] = allowed_users_base[i];
+                i++; j++;
+                // for safety
+                if(i > 1023) {
+                    break;
+                }
+            }
+            if (ngx_strcmp(lcurusr, lregusr) == 0) {
+                k = 1;
+                break;
+            }
+            if(k < 0) {
+                break;
+            }
+            i++;
+        }
+        //ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "register-user: %s", lregusr);
+        if(k == 1) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "Welcome %s", lcurusr);
+        } else {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "Sorry! access denied");
+            return NGX_ERROR;
+        }
         ctx->user_dn.len = ngx_strlen(ctx->dn.data);
         ctx->user_dn.data = (u_char *) ngx_palloc(ctx->r->pool, ctx->user_dn.len + 1);
         ngx_memcpy(ctx->user_dn.data, ctx->dn.data, ctx->user_dn.len + 1);

@@ -1,5 +1,7 @@
-# LDAP Authentication module for nginx
+# LDAP Authentication module for nginx with User Config
 LDAP module for nginx which supports authentication against multiple LDAP servers.
+
+As this is a fork from [KNSPB](https://github.com/kvspb/nginx-auth-ldap) Everything is the same accept that a bit modification to add 'allowed-user' config, to allow which user granted even though LDAP authenticated
 
 # How to install
 
@@ -143,3 +145,23 @@ LDAP library default is on. This option disables usage of referral messages from
 LDAP server. Useful for authenticating against read only AD server without access
 to read write.
 
+## allowed_users
+expected value: file path
+
+Point to User list that are allowed
+
+Example:
+```bash
+    http {
+      ...
+      ldap_server test {
+        url ldap://192.168.0.2:3268/DC=test,DC=local?sAMAccountName?sub?(objectClass=person);
+        binddn "TEST\\LDAPUSER";
+        binddn_passwd LDAPPASSWORD;
+        group_attribute uniquemember;
+        group_attribute_is_dn on;
+        require valid_user;
+        allowed_users "/home/user/conf/list.txt";
+      }
+    }
+```
