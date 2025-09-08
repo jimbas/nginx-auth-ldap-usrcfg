@@ -1,7 +1,7 @@
 # LDAP Authentication module for nginx with User Config
 LDAP module for nginx which supports authentication against multiple LDAP servers.
 
-As this is a fork from [KNSPB](https://github.com/kvspb/nginx-auth-ldap) Everything is the same accept that a bit modification to add 'allowed-user' config, to allow which user granted even though LDAP authenticated
+As this is a fork from [KNSPB](https://github.com/kvspb/nginx-auth-ldap) Everything is the same accept that a bit modification to add **allowed-user** config, to allow which user granted even though LDAP authenticated
 
 # How to install
 
