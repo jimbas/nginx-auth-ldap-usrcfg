@@ -148,7 +148,7 @@ to read write.
 ## allowed_users
 expected value: file path
 
-Point to User list that are allowed
+Point to User list that are allowed. See file **allowed_users.txt** as sample
 
 Example:
 ```bash
@@ -161,7 +161,7 @@ Example:
         group_attribute uniquemember;
         group_attribute_is_dn on;
         require valid_user;
-        allowed_users "/home/user/conf/list.txt";
+        allowed_users "/home/user/allowed_users.txt";
       }
     }
 ```
